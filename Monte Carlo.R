@@ -64,7 +64,7 @@ lines(days, mean_row,
 #add no change line
 abline(h = no_change_value, 
        col = "black", 
-       lwd = 3, a
+       lwd = 3, 
        lty = 2)
 
 print((mean_row[255] - no_change_value) / no_change_value *100)
