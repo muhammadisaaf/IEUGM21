@@ -1,0 +1,23 @@
+library(readxl)
+library(tidyverse)
+IO_data <- read_excel("R/Data for Learning/IO data Simple.xlsx")
+View(IO_data)
+
+A_matrix <- IO_data[1:17, 2:18]
+
+for (x in 1:17) {
+  for (y in 1:17) {
+    A_matrix[y, x] <- A_matrix[y, x]/IO_data[x, 38]
+  }
+}
+
+identity_matrix <- diag(17)
+I_A <- A_matrix
+
+for (x in 1:17) {
+  for (y in 1:17) {
+    I_A[x, y] <- identity_matrix[x, y] - A_matrix[x, y]
+  }
+}
+
+Inverse_Leontief <- solve(as.matrix(I_A))
