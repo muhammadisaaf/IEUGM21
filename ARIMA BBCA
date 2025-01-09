@@ -1,0 +1,189 @@
+##call packages
+library(seastests)
+library(quantmod)
+library(tidyquant)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(forecast)
+library(scales)
+library(Metrics)
+library(tseries)
+
+#BBCA
+BBCA = tq_get("BBCA.JK",get = "stock.prices")
+
+check_seasonality <- isSeasonal(BBCA$close, test = "combined", freq = 251)
+
+if (check_seasonality == TRUE) {
+  #Decomposing if there is seasonality
+  data.ts <- ts(BBCA$close, frequency = 251)
+  price.de <- decompose(data.ts)
+  plot(price.de)
+
+  BBCA$price <- price.de$random
+  BBCA$close_price <- price.de$random
+
+} else {
+  BBCA$price <- BBCA$close
+  BBCA$close_price <- BBCA$close
+}
+
+BBCA <- BBCA[!is.na(BBCA$price), ]
+
+if (adf.test(BBCA$price)$p.value <= 0.01 & pp.test(BBCA$price)$p.value <= 0.01) {
+  BBCA$price <- BBCA$price
+  print("stationer at level")
+  d = 0
+
+} else {
+  BBCA$price <- BBCA$price - lag(BBCA$price)
+  BBCA <- BBCA[!is.na(BBCA$price), ]
+
+  if (adf.test(BBCA$price)$p.value <= 0.01 & pp.test(BBCA$price)$p.value <= 0.01) {
+    BBCA$price <- BBCA$price
+    print("stationer at 1-diff")
+    d = 1
+
+  } else {
+    BBCA$price <- BBCA$price - lag(BBCA$price)
+    BBCA <- BBCA[!is.na(BBCA$price), ]
+
+    if (adf.test(BBCA$price)$p.value <= 0.01 & pp.test(BBCA$price)$p.value <= 0.01) {
+      BBCA$price <- BBCA$price
+      print("stationer at 2-diff")
+      d = 2
+
+    } else {
+      BBCA$price <- BBCA$price - lag(BBCA$price)
+      BBCA <- BBCA[!is.na(BBCA$price), ]
+
+      if (adf.test(BBCA$price)$p.value <= 0.01 & pp.test(BBCA$price)$p.value <= 0.01) {
+        BBCA$price <- BBCA$price
+        print("stationer at 3-diff")
+        d = 3
+
+      }
+    }
+  }
+}
+
+model <- tibble(p = 999999, d = 999999, q = 999999, aic = 999999, bic = 999999 )
+
+for (p in 1:5) {
+  for (q in 1:5) {
+    arima <- Arima(BBCA$close, order=c(p,d,q))
+    model <- model %>%
+      add_row(
+        p = p, d = d, q = q, aic = arima$aic, bic = arima$bic
+      )
+  }
+}
+
+model <- model[model$p != 999999, ]
+
+model
+
+View(model)
+
+model <- model %>%
+  mutate(
+    both_aic_bic = (aic + bic)/2
+  )
+
+model <- model %>%
+  mutate(
+    min_aic = min(aic),
+    min_bic = min(bic),
+    min_both = min(both_aic_bic)
+  )
+
+rmse_calc <- tibble(
+  actual_data_toforecast = BBCA$close[(length(BBCA$close)-9):length(BBCA$close)]
+)
+
+model <- model %>%
+  mutate(
+    rmse = 99999
+  )
+
+traing_set <- tibble(
+  actual_data_training = BBCA$close[1:(length(BBCA$close)-9)]
+)
+
+rmse_calc <- tibble(
+  actual_data_toforecast = BBCA$close[(length(BBCA$close)-9):length(BBCA$close)]
+)
+
+for (x in 1:length(model$p)) {
+  if (model$aic[x] == model$min_aic[x]) {
+    p1 = model$p[x]
+    d1 = d
+    q1 = model$q[x]
+    best_model_1 <- Arima(traing_set$actual_data_training, order=c(p1,d1,q1))
+
+    rmse_calc <- rmse_calc %>%
+      mutate(model_1 = predict(best_model_1, 10)$pred)
+
+    model <- model %>%
+      add_row(
+        p = p1, d = d1, q = q1, rmse = rmse(rmse_calc$actual_data_toforecast, rmse_calc$model_1)
+      )
+  }
+}
+
+for (x in 1:length(model$p)) {
+  if (model$bic[x] == model$min_bic[x] & !is.na(model$bic[x])) {
+    p2 = model$p[x]
+    d2 = d
+    q2 = model$q[x]
+    best_model_2 <- Arima(traing_set$actual_data_training, order=c(p2,d2,q2))
+
+    rmse_calc <- rmse_calc %>%
+      mutate(model_2 = predict(best_model_2, 10)$pred)
+
+    model <- model %>%
+      add_row(
+        p = p2, d = d2, q = q2, rmse = rmse(rmse_calc$actual_data_toforecast, rmse_calc$model_2)
+      )
+  }
+}
+
+for (x in 1:length(model$p)) {
+  if (model$both_aic_bic[x] == model$min_both[x] & !is.na(model$min_both[x])) {
+    p3 = model$p[x]
+    d3 = d
+    q3 = model$q[x]
+    best_model_3 <- Arima(traing_set$actual_data_training, order=c(p3,d3,q3))
+
+    rmse_calc <- rmse_calc %>%
+      mutate(model_3 = predict(best_model_3, 10)$pred)
+
+    model <- model %>%
+      add_row(
+        p = p3, d = d3, q = q3, rmse = rmse(rmse_calc$actual_data_toforecast, rmse_calc$model_3)
+      )
+  }
+}
+
+model <- model %>%
+  mutate(rmse_cek = min(rmse))
+
+for (x in 1:length(model$p)) {
+  if (model$rmse_cek[x] == model$rmse[x]) {
+    p_all = model$p[x]
+    d_all = d
+    q_all = model$q[x]
+  }
+}
+
+best_model_all <- Arima(BBCA$close, order=c(p_all,d_all,q_all))
+
+forecast_5t <- tibble(
+  time_forward = c(1:5),
+  forecast = c(predict(best_model_all, 5)$pred)
+)
+
+View(forecast_5t)
+
+forecast_5t
